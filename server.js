@@ -1,29 +1,37 @@
 const express = require('express');
 const cors = require('cors');
-const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
 // Initialize Express app
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Initialize SQLite database
-const db = new Database(path.join(__dirname, 'portfolio.db'));
+// Simple JSON file database (works everywhere)
+const DB_FILE = path.join(__dirname, 'contacts.json');
 
-// Create contacts table if it doesn't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+// Initialize database file if it doesn't exist
+if (!fs.existsSync(DB_FILE)) {
+  fs.writeFileSync(DB_FILE, JSON.stringify([]));
+}
+
+// Helper functions
+function readDB() {
+  try {
+    const data = fs.readFileSync(DB_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeDB(data) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
 
 console.log('✅ Database ready!');
 
@@ -39,15 +47,23 @@ app.post('/api/contact', (req, res) => {
   }
 
   try {
-    const stmt = db.prepare('INSERT INTO contacts (name, email, message) VALUES (?, ?, ?)');
-    const result = stmt.run(name, email, message);
+    const contacts = readDB();
+    const newContact = {
+      id: Date.now(),
+      name,
+      email,
+      message,
+      created_at: new Date().toISOString()
+    };
+    contacts.push(newContact);
+    writeDB(contacts);
 
     console.log(`📩 New message from: ${name} (${email})`);
 
     res.status(201).json({
       success: true,
       message: 'Message received successfully!',
-      id: result.lastInsertRowid
+      id: newContact.id
     });
   } catch (error) {
     console.error('Database error:', error);
@@ -58,9 +74,8 @@ app.post('/api/contact', (req, res) => {
 // GET - View all messages (for you to check submissions)
 app.get('/api/contacts', (req, res) => {
   try {
-    const stmt = db.prepare('SELECT * FROM contacts ORDER BY created_at DESC');
-    const contacts = stmt.all();
-    res.json(contacts);
+    const contacts = readDB();
+    res.json(contacts.reverse()); // newest first
   } catch (error) {
     console.error('Database error:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
@@ -72,8 +87,12 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running! ⚓' });
 });
 
+// GET - Root route
+app.get('/', (req, res) => {
+  res.json({ message: 'Pirates Backend API 🏴‍☠️', endpoints: ['/api/health', '/api/contacts', '/api/contact'] });
+});
+
 // Start server
 app.listen(PORT, () => {
-  console.log(`🏴‍☠️ Backend server running at http://localhost:${PORT}`);
-  console.log(`📋 View messages at http://localhost:${PORT}/api/contacts`);
+  console.log(`🏴‍☠️ Backend server running on port ${PORT}`);
 });
